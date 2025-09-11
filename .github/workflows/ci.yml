@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        working-directory: bill_validator
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: bill_validator
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run tests
+        working-directory: bill_validator
+        run: flutter test
+
+      - name: Build web (smoke)
+        working-directory: bill_validator
+        run: flutter build web --wasm --base-href=/
+
+      - name: Artifact (Web build)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: bill_validator/build/web
