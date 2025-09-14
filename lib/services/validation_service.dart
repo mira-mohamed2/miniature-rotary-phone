@@ -9,13 +9,33 @@ import 'calculation_service.dart';
 
 /// Main service that orchestrates the validation process
 class ValidationService {
-  final ImageService _imageService = ImageService();
-  final OCRService _ocrService = OCRService();
-  final CalculationService _calculationService = CalculationService();
+  // Allow dependency injection for testability & flexibility
+  final ImageService _imageService;
+  final OCRService _ocrService;
+  final CalculationService _calculationService;
+
+  // Simple in-memory cache (path + modified timestamp => ValidationResult)
+  final Map<String, _CachedResult> _cache = {};
+
+  ValidationService({
+    ImageService? imageService,
+    OCRService? ocrService,
+    CalculationService? calculationService,
+  })  : _imageService = imageService ?? ImageService(),
+        _ocrService = ocrService ?? OCRService(),
+        _calculationService = calculationService ?? CalculationService();
 
   /// Validate a bill image end-to-end
   Future<ValidationResult> validateBillFromImage(File imageFile) async {
     try {
+      // Return cached result if file unchanged
+      final cacheKey = imageFile.path;
+      final lastModified = await imageFile.lastModified();
+      final cached = _cache[cacheKey];
+      if (cached != null && cached.lastModified == lastModified) {
+        return cached.result;
+      }
+
       // 1. Validate image first
       if (!_imageService.isImageValid(imageFile)) {
         return _createErrorResult('Invalid image file', const BillStructure(
@@ -86,13 +106,19 @@ class ValidationService {
       // 8. Clean up temporary files
       _cleanup(processedImage);
       
-      return ValidationResult(
+  final result = ValidationResult(
         isValid: validationResult.isValid,
         errors: validationResult.errors,
         confidenceScore: confidence,
         detectedStructure: billStructure,
         correctedStructure: correctedStructure,
       );
+
+  // Store in cache
+  _cache[cacheKey] = _CachedResult(result: result, lastModified: lastModified);
+  _enforceCacheLimit();
+      
+  return result;
       
     } catch (e) {
       // Return detailed error result
@@ -237,7 +263,29 @@ class ValidationService {
       'ocrConfidenceThreshold': AppConstants.minimumConfidenceScore,
       'roundingTolerance': AppConstants.roundingTolerance,
       'maxProcessingTime': AppConstants.maxProcessingTimeSeconds,
+      'cacheEntries': _cache.length,
+      'cacheKeys': _cache.keys.toList(),
       'supportedFormats': AppConstants.supportedImageFormats,
     };
   }
+
+  /// Clear the in-memory result cache
+  void clearCache() => _cache.clear();
+
+  void _enforceCacheLimit({int maxEntries = 20}) {
+    if (_cache.length <= maxEntries) return;
+    final entries = _cache.entries.toList()
+      ..sort((a, b) => a.value.cachedAt.compareTo(b.value.cachedAt));
+    final toRemove = entries.take(_cache.length - maxEntries);
+    for (final e in toRemove) {
+      _cache.remove(e.key);
+    }
+  }
+}
+
+class _CachedResult {
+  final ValidationResult result;
+  final DateTime lastModified;
+  final DateTime cachedAt = DateTime.now();
+  _CachedResult({required this.result, required this.lastModified});
 }

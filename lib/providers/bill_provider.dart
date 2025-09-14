@@ -6,7 +6,10 @@ import '../services/validation_service.dart';
 
 /// Provider for managing bill validation state
 class BillProvider extends ChangeNotifier {
-  final ValidationService _validationService = ValidationService();
+  final ValidationService _validationService;
+
+  BillProvider({ValidationService? validationService})
+      : _validationService = validationService ?? ValidationService();
   
   // State variables
   File? _currentImage;
